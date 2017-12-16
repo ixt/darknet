@@ -238,18 +238,35 @@ image **load_alphabet()
 void draw_detections(image im, int num, float thresh, box *boxes, float **probs, float **masks, char **names, image **alphabet, int classes)
 {
     int i,j;
+     
+    /*
+     * when producing the output image, output the prediction as a text file
+     * Print the output class, confidence and the bounding box coordinate
+     * Prediction: <class>   <confidence>  Location: <Left> <Right> <Top> <Bottom> 
+     */
+    FILE *out_fd = fopen("prediction_details.txt", "w");
+
+    if (out_fd == NULL)
+    {
+        printf("Error opening file!\n");
+        exit(1);
+    }
 
     for(i = 0; i < num; ++i){
         char labelstr[4096] = {0};
         int class = -1;
+        char percentage[5];
         for(j = 0; j < classes; ++j){
+            snprintf(percentage, 5, ":%f", probs[i][j]*100);
             if (probs[i][j] > thresh){
                 if (class < 0) {
                     strcat(labelstr, names[j]);
+                    strcat(labelstr, percentage);
                     class = j;
                 } else {
                     strcat(labelstr, ", ");
                     strcat(labelstr, names[j]);
+                    strcat(labelstr, percentage);
                 }
                 printf("%s: %.0f%%\n", names[j], probs[i][j]*100);
             }
@@ -283,6 +300,7 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
             int top   = (b.y-b.h/2.)*im.h;
             int bot   = (b.y+b.h/2.)*im.h;
 
+            
             if(left < 0) left = 0;
             if(right > im.w-1) right = im.w-1;
             if(top < 0) top = 0;
@@ -303,8 +321,10 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
                 free_image(resized_mask);
                 free_image(tmask);
             }
+            fprintf(out_fd, "%s,%d,%d,%d,%d\n", labelstr, left, right, top, bot);
         }
     }
+    fclose(out_fd);
 }
 
 void transpose_image(image im)
