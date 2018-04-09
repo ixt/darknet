@@ -131,6 +131,7 @@ image tile_images(image a, image b, int dx)
 
 image get_label(image **characters, char *string, int size)
 {
+    size = size/10;
     if(size > 7) size = 7;
     image label = make_empty_image(0,0,0);
     while(*string){
@@ -235,7 +236,7 @@ image **load_alphabet()
     return alphabets;
 }
 
-void draw_detections(image im, int num, float thresh, box *boxes, float **probs, float **masks, char **names, image **alphabet, int classes)
+void draw_detections(image im, detection *dets, int num, float thresh, char **names, image **alphabet, int classes)
 {
     int i,j;
      
@@ -244,21 +245,22 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
      * Print the output class, confidence and the bounding box coordinate
      * Prediction: <class>   <confidence>  Location: <Left> <Right> <Top> <Bottom> 
      */
-    FILE *out_fd = fopen("prediction_details.txt", "w");
+    FILE *out_fd = fopen("predictions.json", "w");
 
     if (out_fd == NULL)
     {
         printf("Error opening file!\n");
         exit(1);
     }
+    fprintf(out_fd, "[");
 
     for(i = 0; i < num; ++i){
         char labelstr[4096] = {0};
         int class = -1;
         char percentage[5];
         for(j = 0; j < classes; ++j){
-            snprintf(percentage, 5, ":%f", probs[i][j]*100);
-            if (probs[i][j] > thresh){
+            snprintf(percentage, 5, ":%f", dets[i].prob[j]*100);
+            if (dets[i].prob[j] > thresh){
                 if (class < 0) {
                     strcat(labelstr, names[j]);
                     strcat(labelstr, percentage);
@@ -268,10 +270,15 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
                     strcat(labelstr, names[j]);
                     strcat(labelstr, percentage);
                 }
-                printf("%s: %.0f%%\n", names[j], probs[i][j]*100);
+                printf("%s: %.0f%%\n", names[j], dets[i].prob[j]*100);
             }
         }
         if(class >= 0){
+
+            if ( i > 0 ){ 
+                fprintf(out_fd, ",");
+            }
+
             int width = im.h * .006;
 
             /*
@@ -293,7 +300,8 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
             rgb[0] = red;
             rgb[1] = green;
             rgb[2] = blue;
-            box b = boxes[i];
+            box b = dets[i].bbox;
+            //printf("%f %f %f %f\n", b.x, b.y, b.w, b.h);
 
             int left  = (b.x-b.w/2.)*im.w;
             int right = (b.x+b.w/2.)*im.w;
@@ -308,12 +316,12 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
 
             draw_box_width(im, left, top, right, bot, width, red, green, blue);
             if (alphabet) {
-                image label = get_label(alphabet, labelstr, (im.h*.03)/10);
+                image label = get_label(alphabet, labelstr, (im.h*.03));
                 draw_label(im, top + width, left, label, rgb);
                 free_image(label);
             }
-            if (masks){
-                image mask = float_to_image(14, 14, 1, masks[i]);
+            if (dets[i].mask){
+                image mask = float_to_image(14, 14, 1, dets[i].mask);
                 image resized_mask = resize_image(mask, b.w*im.w, b.h*im.h);
                 image tmask = threshold_image(resized_mask, .5);
                 embed_image(tmask, im, left, top);
@@ -321,9 +329,10 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
                 free_image(resized_mask);
                 free_image(tmask);
             }
-            fprintf(out_fd, "%s,%d,%d,%d,%d\n", labelstr, left, right, top, bot);
+            fprintf(out_fd, "{\"object\":%d,\"label\":\"%s\",\"x1\":%d,\"y1\":%d,\"x2\":%d,\"y2\":%d, \"width\": %f, \"height\": %f}", i, labelstr, left, top, right, bot, b.w*im.w, b.h*im.h);
         }
     }
+    fprintf(out_fd, "]");
     fclose(out_fd);
 }
 
@@ -409,6 +418,35 @@ void ghost_image(image source, image dest, int dx, int dy)
                 float v2 = get_pixel(dest, dx+x,dy+y,k);
                 float val = alpha*v1 + (1-alpha)*v2;
                 set_pixel(dest, dx+x, dy+y, k, val);
+            }
+        }
+    }
+}
+
+void blocky_image(image im, int s)
+{
+    int i,j,k;
+    for(k = 0; k < im.c; ++k){
+        for(j = 0; j < im.h; ++j){
+            for(i = 0; i < im.w; ++i){
+                im.data[i + im.w*(j + im.h*k)] = im.data[i/s*s + im.w*(j/s*s + im.h*k)];
+            }
+        }
+    }
+}
+
+void censor_image(image im, int dx, int dy, int w, int h)
+{
+    int i,j,k;
+    int s = 32;
+    if(dx < 0) dx = 0;
+    if(dy < 0) dy = 0;
+
+    for(k = 0; k < im.c; ++k){
+        for(j = dy; j < dy + h && j < im.h; ++j){
+            for(i = dx; i < dx + w && i < im.w; ++i){
+                im.data[i + im.w*(j + im.h*k)] = im.data[i/s*s + im.w*(j/s*s + im.h*k)];
+                //im.data[i + j*im.w + k*im.w*im.h] = 0;
             }
         }
     }
@@ -769,8 +807,8 @@ void place_image(image im, int w, int h, int dx, int dy, image canvas)
     for(c = 0; c < im.c; ++c){
         for(y = 0; y < h; ++y){
             for(x = 0; x < w; ++x){
-                int rx = ((float)x / w) * im.w;
-                int ry = ((float)y / h) * im.h;
+                float rx = ((float)x / w) * im.w;
+                float ry = ((float)y / h) * im.h;
                 float val = bilinear_interpolate(im, rx, ry, c);
                 set_pixel(canvas, x + dx, y + dy, c, val);
             }
