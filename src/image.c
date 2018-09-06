@@ -599,7 +599,7 @@ void show_image_cv(image p, const char *name, IplImage *disp)
 }
 #endif
 
-void show_image(image p, const char *name)
+int show_image(image p, const char *name, int ms)
 {
 #ifdef OPENCV
     IplImage *disp = cvCreateImage(cvSize(p.w,p.h), IPL_DEPTH_8U, p.c);
@@ -608,9 +608,13 @@ void show_image(image p, const char *name)
     show_image_cv(copy, name, disp);
     free_image(copy);
     cvReleaseImage(&disp);
+    int c = cvWaitKey(ms);
+    if (c != -1) c = c%256;
+    return c;
 #else
     fprintf(stderr, "Not compiled with OpenCV, saving to %s.png instead\n", name);
     save_image(p, name);
+    return 0;
 #endif
 }
 
@@ -754,7 +758,7 @@ void show_image_layers(image p, char *name)
     for(i = 0; i < p.c; ++i){
         sprintf(buff, "%s - Layer %d", name, i);
         image layer = get_image_layer(p, i);
-        show_image(layer, buff);
+        show_image(layer, buff, 1);
         free_image(layer);
     }
 }
@@ -762,7 +766,7 @@ void show_image_layers(image p, char *name)
 void show_image_collapsed(image p, char *name)
 {
     image c = collapse_image_layers(p, 1);
-    show_image(c, name);
+    show_image(c, name, 1);
     free_image(c);
 }
 
@@ -1433,16 +1437,16 @@ void test_resize(char *filename)
     distort_image(c4, .1, .66666, 1.5);
 
 
-    show_image(im,   "Original");
-    show_image(gray, "Gray");
-    show_image(c1, "C1");
-    show_image(c2, "C2");
-    show_image(c3, "C3");
-    show_image(c4, "C4");
+    show_image(im,   "Original", 1);
+    show_image(gray, "Gray", 1);
+    show_image(c1, "C1", 1);
+    show_image(c2, "C2", 1);
+    show_image(c3, "C3", 1);
+    show_image(c4, "C4", 1);
 #ifdef OPENCV
     while(1){
         image aug = random_augment_image(im, 0, .75, 320, 448, 320, 320);
-        show_image(aug, "aug");
+        show_image(aug, "aug", 1);
         free_image(aug);
 
 
@@ -1457,7 +1461,7 @@ void test_resize(char *filename)
         float dhue = rand_uniform(-hue, hue);
 
         distort_image(c, dhue, dsat, dexp);
-        show_image(c, "rand");
+        show_image(c, "rand", 1);
         printf("%f %f %f\n", dhue, dsat, dexp);
         free_image(c);
         cvWaitKey(0);
@@ -1612,7 +1616,7 @@ void show_image_normalized(image im, const char *name)
 {
     image c = copy_image(im);
     normalize_image(c);
-    show_image(c, name);
+    show_image(c, name, 1);
     free_image(c);
 }
 
@@ -1630,7 +1634,7 @@ void show_images(image *ims, int n, char *window)
      */
     normalize_image(m);
     save_image(m, window);
-    show_image(m, window);
+    show_image(m, window, 1);
     free_image(m);
 }
 
